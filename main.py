@@ -1,15 +1,15 @@
-# from opencv_test import byte_stream_to_opencv
-# from mp4_to_byte import mp4_to_byte_stream
-# from play_video import play_frames
-
 import cv2
 import subprocess
-global file_path
-file_path = '/home/tg0014/Desktop/highway.mp4'
+import tempfile
+import os
 
 
-def mp4_to_byte_stream(file):
-    cap = cv2.VideoCapture(file)
+def mp4_to_byte_stream(file_path):
+    cap = cv2.VideoCapture(file_path)
+    if not cap.isOpened():
+        print(f"Error: Could not open video file {file_path}")
+        return None
+
     byte_stream = bytearray()
 
     while cap.isOpened():
@@ -17,8 +17,7 @@ def mp4_to_byte_stream(file):
         if not ret:
             break
 
-        frame_bytes = cv2.imencode('.jpg', frame)[1].tobytes()
-
+        _, frame_bytes = cv2.imencode('.jpg', frame)
         byte_stream.extend(frame_bytes)
 
     cap.release()
@@ -26,16 +25,26 @@ def mp4_to_byte_stream(file):
 
 
 def byte_stream_to_opencv(byte_stream):
-    temp_file = 'temp_video.mp4'
-    with open(temp_file, 'wb') as f:
-        f.write(byte_stream)
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+        temp_file.write(byte_stream)
+        temp_file_path = temp_file.name
 
-    ffmpeg_command = ['ffmpeg', '-i', temp_file, '-vcodec', 'mpeg4', '-acodec', 'aac', 'output_video.mp4']
-    subprocess.run(ffmpeg_command)
+    output_file_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
 
-    video_capture = cv2.VideoCapture('output_video.mp4')
+    ffmpeg_command = ['ffmpeg', '-i', temp_file_path, '-vcodec', 'mpeg4', '-acodec', 'aac', output_file_path]
+    try:
+        subprocess.run(ffmpeg_command, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error: ffmpeg command failed with error {e}")
+        return []
+
+    video_capture = cv2.VideoCapture(output_file_path)
+    if not video_capture.isOpened():
+        print(f"Error: Could not open temporary video file {output_file_path}")
+        return []
 
     frames = []
+
     while True:
         ret, frame = video_capture.read()
         if not ret:
@@ -44,18 +53,31 @@ def byte_stream_to_opencv(byte_stream):
 
     video_capture.release()
     cv2.destroyAllWindows()
-    subprocess.run(['rm', temp_file])
-    subprocess.run(['rm', 'output_video.mp4'])
+
+    os.remove(temp_file_path)
+    os.remove(output_file_path)
 
     return frames
 
 
-def play_frames(frames):
+def play_frames(frames, width=640, height=360):
+    if not frames:
+        print("Error: No frames to display")
+        return
+
     for frame in frames:
-        cv2.imshow('highway', frame)
+        resized_frame = cv2.resize(frame, (200, 100))
+        cv2.imshow('highway', resized_frame)
         if cv2.waitKey(25) & 0xFF == ord('q'):
             break  # Press 'q' to quit
     cv2.destroyAllWindows()
 
 
-play_frames(byte_stream_to_opencv(mp4_to_byte_stream(file_path)))
+if __name__ == "__main__":
+    file_path = '/home/tg0014/Desktop/highway.mp4'
+    byte_stream = mp4_to_byte_stream(file_path)
+    if byte_stream:
+        frames = byte_stream_to_opencv(byte_stream)
+        play_frames(frames, width=640, height=360)
+    else:
+        print("Error: Byte stream conversion failed")
